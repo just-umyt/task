@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  task-app:
+    build: ./
+    command: ./task
+    ports:
+      - 9000:8000
+    depends_on:
+      - db
+    environment:
+      - DB_PASSWORD=password
+
+  db:
+    restart: always
+    image: postgres
+    volumes:
+      - ./.database/postgres/data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=password
+    ports:
+      - 5433:5432
