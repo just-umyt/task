@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -140,6 +142,17 @@ func (authHandler *AuthHandler) UserSignIn(c *fiber.Ctx) error {
 
 	//Encode Refresh token to base64
 	tokens.Refresh = utils.EncodeToBase(tokens.Refresh)
+	refreshTokensExpires, _ := strconv.Atoi(os.Getenv("JWT_REFRESH_KEY_EXPIRE_HOURS_COUNT"))
+
+	//Set refresh token to cookie
+	c.Cookie(&fiber.Cookie{
+		Name:    "refresh",
+		Value:   tokens.Refresh,
+		Expires: time.Now().Add(time.Hour * time.Duration(refreshTokensExpires)),
+		// HTTPOnly: true,
+		// Secure:   true,
+		// SameSite: "Strict",
+	})
 
 	return c.JSON(fiber.Map{
 		"error":  false,

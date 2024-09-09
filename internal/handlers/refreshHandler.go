@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"os"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/just-umyt/task/internal/models"
@@ -20,7 +22,26 @@ func NewTokenHandler(tokenRepo TokenRepository) *TokenHandler {
 }
 
 func (tokenrepo *TokenHandler) RefreshToken(c *fiber.Ctx) error {
-	basedRefreshToken := c.Get("Authorization")
+	accessToken := c.Get("Authorization")
+	basedRefreshToken := c.Cookies("refresh")
+
+	//get claims from access token
+	accessClaims, err := utils.ParseToken(accessToken[7:], os.Getenv("JWT_SECRET_KEY"))
+
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": true,
+			"msg":   err.Error(),
+		})
+	}
+
+	//Checking refresh token
+	if basedRefreshToken == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": true,
+			"msg":   "Unauthorized",
+		})
+	}
 
 	//decode from base
 	refreshToken, err := utils.DecodeFromBase(basedRefreshToken)
@@ -31,8 +52,8 @@ func (tokenrepo *TokenHandler) RefreshToken(c *fiber.Ctx) error {
 		})
 	}
 
-	//get user id, ip, jit from refresh token
-	userId, ip, jti, err := utils.ParseRefreshToken(refreshToken)
+	//get claims from refresh token
+	refreshClaims, err := utils.ParseToken(refreshToken, os.Getenv("JWT_REFRESH_KEY"))
 
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -41,8 +62,24 @@ func (tokenrepo *TokenHandler) RefreshToken(c *fiber.Ctx) error {
 		})
 	}
 
+	//Checking access and refresh Id
+	if accessClaims.ID != refreshClaims.ID {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": true,
+			"msg":   "токены Не связанные",
+		})
+	}
+
+	//check user d in tokens
+	if accessClaims.UserId != refreshClaims.UserId {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": true,
+			"msg":   "Токены фальшивые. Авторизуйтесь заново",
+		})
+	}
+
 	//find user by id
-	foundedUser, err := tokenrepo.TokenRepo.GetUserById(userId)
+	foundedUser, err := tokenrepo.TokenRepo.GetUserById(refreshClaims.UserId)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": true,
@@ -61,7 +98,7 @@ func (tokenrepo *TokenHandler) RefreshToken(c *fiber.Ctx) error {
 	//compare ip address
 	// ip = "another ip" //to check
 
-	if c.IP() != ip {
+	if c.IP() != refreshClaims.Ip && c.IP() != accessClaims.Ip {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": true,
 			"msg":   "someone tries login to your account",
@@ -69,7 +106,7 @@ func (tokenrepo *TokenHandler) RefreshToken(c *fiber.Ctx) error {
 	}
 
 	//give a new acces token
-	newAccessToken, err := utils.NewAccessToken(userId, c.IP(), jti)
+	newAccessToken, err := utils.NewAccessToken(*refreshClaims)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": true,

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/gofiber/fiber/v2"
@@ -28,8 +27,6 @@ func main() {
 
 	//Setup routes
 	router.SetupRouter(app)
-
-	fmt.Println("gee")
 
 	//Listen and serve
 	app.Listen(os.Getenv("SERVER_HOST") + ":" + os.Getenv("SERVER_PORT"))

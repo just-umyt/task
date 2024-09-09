@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"strconv"
@@ -20,8 +19,8 @@ type Tokens struct {
 }
 
 type MyCustomClaims struct {
-	UserId string `json:"user_id"`
-	Ip     string `json:"ip"`
+	UserId uuid.UUID `json:"user_id"`
+	Ip     string    `json:"ip"`
 	jwt.RegisteredClaims
 }
 
@@ -30,13 +29,37 @@ func CreateNewTokens(id uuid.UUID, ip string) (*Tokens, error) {
 	jti := strconv.Itoa(rand.Intn(1000000000))
 
 	//new access token
-	accessToken, err := NewAccessToken(id, ip, jti)
+	minutesCount, _ := strconv.Atoi(os.Getenv("JWT_SECRET_KEY_EXPIRE_MINUTES_COUNT"))
+
+	accessClaims := MyCustomClaims{
+		id,
+		ip,
+		jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(minutesCount) * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        jti,
+		},
+	}
+
+	accessToken, err := NewAccessToken(accessClaims)
 	if err != nil {
 		return nil, err
 	}
 
 	//new refresh token
-	refreshToken, err := NewRefreshToken(id, ip, jti)
+	hoursCount, _ := strconv.Atoi(os.Getenv("JWT_REFRESH_KEY_EXPIRE_HOURS_COUNT"))
+
+	refreshClaims := MyCustomClaims{
+		id,
+		ip,
+		jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(hoursCount) * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        jti,
+		},
+	}
+
+	refreshToken, err := NewRefreshToken(refreshClaims)
 	if err != nil {
 		return nil, err
 	}
@@ -47,26 +70,8 @@ func CreateNewTokens(id uuid.UUID, ip string) (*Tokens, error) {
 	}, nil
 }
 
-func NewAccessToken(id uuid.UUID, ip string, jti string) (string, error) {
+func NewAccessToken(claims MyCustomClaims) (string, error) {
 	secret := []byte(os.Getenv("JWT_SECRET_KEY"))
-	minutesCount, _ := strconv.Atoi(os.Getenv("JWT_SECRET_KEY_EXPIRE_MINUTES_COUNT"))
-
-	type MyCustomClaims struct {
-		UserId string `json:"user_id"`
-		Ip     string `json:"ip"`
-		jwt.RegisteredClaims
-	}
-
-	// Create the Claims
-	claims := MyCustomClaims{
-		id.String(),
-		ip,
-		jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(minutesCount) * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ID:        jti,
-		},
-	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
 	ss, err := token.SignedString(secret)
@@ -77,20 +82,8 @@ func NewAccessToken(id uuid.UUID, ip string, jti string) (string, error) {
 	return ss, nil
 }
 
-func NewRefreshToken(id uuid.UUID, ip string, jti string) (string, error) {
+func NewRefreshToken(claims MyCustomClaims) (string, error) {
 	secret := []byte(os.Getenv("JWT_REFRESH_KEY"))
-	hoursCount, _ := strconv.Atoi(os.Getenv("JWT_REFRESH_KEY_EXPIRE_HOURS_COUNT"))
-
-	// Create the Claims
-	claims := MyCustomClaims{
-		id.String(),
-		ip,
-		jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(hoursCount) * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ID:        jti,
-		},
-	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	ss, err := token.SignedString(secret)
@@ -101,22 +94,16 @@ func NewRefreshToken(id uuid.UUID, ip string, jti string) (string, error) {
 	return ss, nil
 }
 
-func ParseRefreshToken(refresh string) (uuid.UUID, string, string, error) {
-
-	token, err := jwt.ParseWithClaims(refresh, &MyCustomClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return []byte(os.Getenv("JWT_REFRESH_KEY")), nil
+func ParseToken(tokenString, secret string) (*MyCustomClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &MyCustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
 	})
 
-	if err != nil {
-		return uuid.Nil, "", "", err
-	} else if claims, ok := token.Claims.(*MyCustomClaims); ok {
-		userId, _ := uuid.Parse(claims.UserId)
-		return userId, claims.Ip, claims.ID, nil
+	if claims, ok := token.Claims.(*MyCustomClaims); ok && token.Valid {
+		return claims, nil
 	} else {
-		log.Fatal("unknown claims type, cannot proceed")
+		return nil, err
 	}
-
-	return uuid.Nil, "", "", nil
 }
 
 // Convert token to hash
@@ -147,7 +134,7 @@ func EncodeToBase(token string) string {
 
 // Decode based token to string
 func DecodeFromBase(based string) (string, error) {
-	refreshT, err := base64.StdEncoding.DecodeString(based[7:])
+	refreshT, err := base64.StdEncoding.DecodeString(based)
 	if err != nil {
 		return "", nil
 	}
